@@ -1,0 +1,729 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import shlex
+import shutil
+import subprocess
+import sys
+import urllib.parse
+
+APP_ID = "io.github.kwran420.M365LinuxShell"
+APP_NAME = "Microsoft 365 Linux Shell"
+VERSION = "0.1.0"
+ROUTER_DESKTOP = f"{APP_ID}.Router.desktop"
+
+APPS = {
+    "outlook": {
+        "name": "Outlook",
+        "url": "https://outlook.cloud.microsoft/mail/",
+        "legacy_url": "https://outlook.office.com/mail/",
+        "class": "M365LinuxOutlook",
+    },
+    "calendar": {
+        "name": "Outlook Calendar",
+        "url": "https://outlook.cloud.microsoft/calendar/",
+        "legacy_url": "https://outlook.office.com/calendar/",
+        "class": "M365LinuxCalendar",
+    },
+    "m365": {
+        "name": "Microsoft 365",
+        "url": "https://m365.cloud.microsoft/",
+        "legacy_url": "https://www.microsoft365.com/",
+        "class": "M365LinuxShell",
+    },
+    "word": {
+        "name": "Word",
+        "url": "https://word.cloud.microsoft/",
+        "legacy_url": "https://www.microsoft365.com/launch/word",
+        "class": "M365LinuxWord",
+    },
+    "excel": {
+        "name": "Excel",
+        "url": "https://excel.cloud.microsoft/",
+        "legacy_url": "https://www.microsoft365.com/launch/excel",
+        "class": "M365LinuxExcel",
+    },
+    "powerpoint": {
+        "name": "PowerPoint",
+        "url": "https://powerpoint.cloud.microsoft/",
+        "legacy_url": "https://www.microsoft365.com/launch/powerpoint",
+        "class": "M365LinuxPowerPoint",
+    },
+    "onedrive": {
+        "name": "OneDrive",
+        "url": "https://onedrive.cloud.microsoft/",
+        "legacy_url": "https://onedrive.live.com/",
+        "class": "M365LinuxOneDrive",
+    },
+}
+
+BROWSER_COMMANDS = [
+    "microsoft-edge-stable",
+    "microsoft-edge",
+    "google-chrome-stable",
+    "google-chrome",
+    "chrome",
+    "chromium",
+    "chromium-browser",
+    "brave-browser",
+    "vivaldi",
+]
+
+BROWSER_DESKTOPS = [
+    "google-chrome.desktop",
+    "com.google.Chrome.desktop",
+    "chromium-browser.desktop",
+    "chromium_chromium.desktop",
+    "firefox.desktop",
+    "microsoft-edge.desktop",
+    "microsoft-edge-stable.desktop",
+    "brave-browser.desktop",
+    "vivaldi-stable.desktop",
+]
+
+MICROSOFT_365_HOSTS = {
+    "m365.cloud.microsoft",
+    "www.microsoft365.com",
+    "microsoft365.com",
+    "www.office.com",
+    "office.com",
+    "outlook.cloud.microsoft",
+    "outlook.office.com",
+    "outlook.live.com",
+    "word.cloud.microsoft",
+    "excel.cloud.microsoft",
+    "powerpoint.cloud.microsoft",
+    "onedrive.cloud.microsoft",
+    "onedrive.live.com",
+    "office.live.com",
+    "officeapps.live.com",
+    "login.microsoftonline.com",
+    "login.live.com",
+}
+
+MICROSOFT_365_SUFFIXES = (
+    ".sharepoint.com",
+    ".office.com",
+    ".office.net",
+    ".officeapps.live.com",
+    ".microsoft365.com",
+    ".cloud.microsoft",
+)
+
+TEAMS_HOSTS = {
+    "teams.cloud.microsoft",
+    "teams.microsoft.com",
+    "teams.live.com",
+}
+
+ROUTABLE_SCHEMES = ("http", "https", "mailto")
+
+
+def xdg_config_home() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+
+
+def xdg_cache_home() -> Path:
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+
+
+def xdg_state_home() -> Path:
+    return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+
+
+def xdg_data_home() -> Path:
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+
+
+def config_dir() -> Path:
+    return Path(os.environ.get("M365_SHELL_CONFIG_DIR", xdg_config_home() / "m365-linux-shell"))
+
+
+def cache_dir() -> Path:
+    return Path(os.environ.get("M365_SHELL_CACHE_DIR", xdg_cache_home() / "m365-linux-shell"))
+
+
+def state_dir() -> Path:
+    return Path(os.environ.get("M365_SHELL_STATE_DIR", xdg_state_home() / "m365-linux-shell"))
+
+
+def profile_dir(profile: str) -> Path:
+    safe = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in profile.strip())
+    return config_dir() / "profiles" / (safe or "work")
+
+
+def config_file() -> Path:
+    return config_dir() / "config.json"
+
+
+def default_config() -> dict:
+    return {
+        "fallback_web_browser": "",
+        "previous_handlers": {},
+        "default_profile": "work",
+        "default_app": "outlook",
+        "use_legacy_urls": False,
+    }
+
+
+def read_config() -> dict:
+    path = config_file()
+    if not path.exists():
+        return default_config()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return default_config()
+    merged = default_config()
+    merged.update(data)
+    if not isinstance(merged.get("previous_handlers"), dict):
+        merged["previous_handlers"] = {}
+    return merged
+
+
+def write_config(config: dict) -> None:
+    config_dir().mkdir(parents=True, exist_ok=True)
+    config_file().write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def command_exists(command: str) -> bool:
+    return shutil.which(command) is not None
+
+
+def run_capture(command: list[str]) -> str:
+    try:
+        completed = subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError:
+        return ""
+    return completed.stdout.strip()
+
+
+def xdg_handler(scheme: str) -> str:
+    if not command_exists("xdg-mime"):
+        return ""
+    return run_capture(["xdg-mime", "query", "default", f"x-scheme-handler/{scheme}"])
+
+
+def xdg_set_handler(scheme: str, desktop: str) -> None:
+    if command_exists("xdg-mime"):
+        subprocess.run(["xdg-mime", "default", desktop, f"x-scheme-handler/{scheme}"], check=False)
+
+
+def xdg_default_browser() -> str:
+    if not command_exists("xdg-settings"):
+        return ""
+    return run_capture(["xdg-settings", "get", "default-web-browser"])
+
+
+def xdg_set_default_browser(desktop: str) -> None:
+    if command_exists("xdg-settings"):
+        subprocess.run(["xdg-settings", "set", "default-web-browser", desktop], check=False)
+
+
+def is_our_desktop(desktop: str) -> bool:
+    return desktop == ROUTER_DESKTOP or desktop.startswith(APP_ID)
+
+
+def is_router_desktop(desktop: str) -> bool:
+    return desktop.endswith(".Router.desktop")
+
+
+def is_unsuitable_fallback(desktop: str) -> bool:
+    return is_our_desktop(desktop) or is_router_desktop(desktop)
+
+
+def data_dirs() -> list[Path]:
+    dirs = [xdg_data_home()]
+    for raw in os.environ.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(":"):
+        if raw:
+            dirs.append(Path(raw))
+    return dirs
+
+
+def find_desktop_file(desktop_id: str) -> Path | None:
+    candidate = Path(desktop_id)
+    if candidate.is_absolute() and candidate.exists():
+        return candidate
+    for base in data_dirs():
+        path = base / "applications" / desktop_id
+        if path.exists():
+            return path
+    return None
+
+
+def read_desktop_exec(path: Path) -> str:
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("Exec="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        return ""
+    return ""
+
+
+def desktop_exec_to_command(exec_line: str, url: str) -> list[str]:
+    tokens = shlex.split(exec_line)
+    result: list[str] = []
+    used_url = False
+    for token in tokens:
+        if token in {"%i", "%c", "%k"}:
+            continue
+        if "%u" in token or "%U" in token:
+            token = token.replace("%u", url).replace("%U", url)
+            used_url = True
+        token = token.replace("%f", "").replace("%F", "").replace("%%", "%")
+        if token:
+            result.append(token)
+    if not used_url:
+        result.append(url)
+    return result
+
+
+def find_fallback_desktop(config: dict) -> str:
+    saved = str(config.get("fallback_web_browser", "")).strip()
+    if saved and not is_unsuitable_fallback(saved) and find_desktop_file(saved):
+        return saved
+    current = xdg_default_browser()
+    if current and not is_unsuitable_fallback(current) and find_desktop_file(current):
+        return current
+    for desktop in BROWSER_DESKTOPS:
+        if find_desktop_file(desktop):
+            return desktop
+    return ""
+
+
+def find_browser() -> str:
+    requested = os.environ.get("M365_SHELL_BROWSER", "").strip()
+    if requested:
+        if Path(requested).is_file() and os.access(requested, os.X_OK):
+            return requested
+        found = shutil.which(requested)
+        if found:
+            return found
+        raise SystemExit(f"error: M365_SHELL_BROWSER is not executable: {requested}")
+    for command in BROWSER_COMMANDS:
+        found = shutil.which(command)
+        if found:
+            return found
+    raise SystemExit("error: no Chromium-family browser found")
+
+
+def browser_version(browser: str) -> str:
+    try:
+        completed = subprocess.run([browser, "--version"], check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError:
+        return ""
+    return completed.stdout.strip().splitlines()[0] if completed.stdout.strip() else ""
+
+
+def app_url(app: str) -> str:
+    config = read_config()
+    key = "legacy_url" if config.get("use_legacy_urls") else "url"
+    return APPS[app][key]
+
+
+def build_browser_command(app: str, target: str, profile: str) -> list[str]:
+    profile_path = profile_dir(profile)
+    profile_path.mkdir(parents=True, exist_ok=True)
+    cache_dir().mkdir(parents=True, exist_ok=True)
+    state_dir().mkdir(parents=True, exist_ok=True)
+    window_class = APPS.get(app, APPS["m365"])["class"]
+    command = [
+        find_browser(),
+        f"--user-data-dir={profile_path}",
+        "--profile-directory=Default",
+        f"--app={target}",
+        f"--class={window_class}",
+        f"--name={window_class}",
+        "--no-first-run",
+        "--no-default-browser-check",
+    ]
+    if os.environ.get("M365_SHELL_USE_WAYLAND") == "1":
+        command.append("--ozone-platform=wayland")
+    elif os.environ.get("M365_SHELL_OZONE_AUTO") == "1":
+        command.append("--ozone-platform-hint=auto")
+    extra = os.environ.get("M365_SHELL_EXTRA_FLAGS", "").strip()
+    if extra:
+        command.extend(shlex.split(extra))
+    return command
+
+
+def launch_url(app: str, target: str, profile: str, dry_run: bool = False) -> int:
+    command = build_browser_command(app, target, profile)
+    if dry_run:
+        print(f"{app}:{profile}:", shlex.join(command))
+        return 0
+    subprocess.Popen(command)
+    return 0
+
+
+def launch_app(app: str, profile: str, dry_run: bool = False) -> int:
+    return launch_url(app, app_url(app), profile, dry_run)
+
+
+def parsed_host(url: str) -> str:
+    return (urllib.parse.urlparse(url).hostname or "").lower()
+
+
+def is_m365_url(url: str) -> bool:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme.lower() == "mailto":
+        return True
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return False
+    if is_teams_url(url):
+        return False
+    host = parsed_host(url)
+    return host in MICROSOFT_365_HOSTS or any(host.endswith(suffix) for suffix in MICROSOFT_365_SUFFIXES)
+
+
+def is_teams_url(url: str) -> bool:
+    parsed = urllib.parse.urlparse(url)
+    host = parsed_host(url)
+    return host in TEAMS_HOSTS or host.endswith(".teams.microsoft.com")
+
+
+def app_for_url(url: str) -> str:
+    host = parsed_host(url)
+    path = urllib.parse.urlparse(url).path.lower()
+    if "outlook" in host or path.startswith("/mail"):
+        return "outlook"
+    if path.startswith("/calendar"):
+        return "calendar"
+    if "word" in host:
+        return "word"
+    if "excel" in host:
+        return "excel"
+    if "powerpoint" in host:
+        return "powerpoint"
+    if "onedrive" in host or "sharepoint" in host:
+        return "onedrive"
+    return "m365"
+
+
+def mailto_to_outlook_url(raw_url: str) -> str:
+    parsed = urllib.parse.urlparse(raw_url)
+    to_value = urllib.parse.unquote(parsed.path)
+    fields = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    query: dict[str, str] = {}
+    if to_value:
+        query["to"] = to_value
+    for source, dest in {
+        "subject": "subject",
+        "body": "body",
+        "cc": "cc",
+        "bcc": "bcc",
+    }.items():
+        if source in fields and fields[source]:
+            query[dest] = fields[source][0]
+    return "https://outlook.office.com/mail/deeplink/compose?" + urllib.parse.urlencode(query)
+
+
+def forward_external_url(url: str, dry_run: bool = False) -> int:
+    config = read_config()
+    desktop = find_fallback_desktop(config)
+    if desktop:
+        path = find_desktop_file(desktop)
+        exec_line = read_desktop_exec(path) if path else ""
+        if exec_line:
+            command = desktop_exec_to_command(exec_line, url)
+            if dry_run:
+                print("forward:", shlex.join(command))
+                return 0
+            subprocess.Popen(command)
+            return 0
+    command = [find_browser(), url]
+    if dry_run:
+        print("forward:", shlex.join(command))
+        return 0
+    subprocess.Popen(command)
+    return 0
+
+
+def route_teams_url(url: str, dry_run: bool = False) -> int:
+    teams_command = shutil.which("teams-linux-native")
+    if teams_command:
+        command = [teams_command, "route", url]
+        if dry_run:
+            print("teams-router:", shlex.join(command))
+            return 0
+        subprocess.Popen(command)
+        return 0
+    return forward_external_url(url, dry_run)
+
+
+def route_url(url: str, profile: str, dry_run: bool = False) -> int:
+    if urllib.parse.urlparse(url).scheme.lower() == "mailto":
+        return launch_url("outlook", mailto_to_outlook_url(url), profile, dry_run)
+    if is_teams_url(url):
+        return route_teams_url(url, dry_run)
+    if is_m365_url(url):
+        return launch_url(app_for_url(url), url, profile, dry_run)
+    return forward_external_url(url, dry_run)
+
+
+def capture_previous_handlers(config: dict, include_http: bool) -> dict:
+    previous = dict(config.get("previous_handlers", {}))
+    schemes = ["mailto"]
+    if include_http:
+        schemes.extend(["http", "https"])
+    for scheme in schemes:
+        current = xdg_handler(scheme)
+        if current and not is_our_desktop(current):
+            previous.setdefault(scheme, current)
+    current_default = xdg_default_browser()
+    if include_http and current_default and not is_our_desktop(current_default):
+        previous.setdefault("default-web-browser", current_default)
+    if include_http:
+        fallback = find_fallback_desktop(config)
+        if fallback:
+            config["fallback_web_browser"] = fallback
+    elif not config.get("fallback_web_browser"):
+        fallback = find_fallback_desktop(config)
+        if fallback:
+            config["fallback_web_browser"] = fallback
+    config["previous_handlers"] = previous
+    return config
+
+
+def enable_router(include_http: bool = True) -> None:
+    config = capture_previous_handlers(read_config(), include_http)
+    write_config(config)
+    xdg_set_handler("mailto", ROUTER_DESKTOP)
+    if include_http:
+        xdg_set_handler("http", ROUTER_DESKTOP)
+        xdg_set_handler("https", ROUTER_DESKTOP)
+        xdg_set_default_browser(ROUTER_DESKTOP)
+
+
+def disable_router() -> None:
+    config = read_config()
+    previous = config.get("previous_handlers", {})
+    fallback = str(config.get("fallback_web_browser") or previous.get("default-web-browser") or "")
+    if xdg_handler("mailto") == ROUTER_DESKTOP and previous.get("mailto"):
+        xdg_set_handler("mailto", str(previous.get("mailto")))
+    for scheme in ("http", "https"):
+        if xdg_handler(scheme) == ROUTER_DESKTOP:
+            xdg_set_handler(scheme, str(previous.get(scheme) or fallback))
+    if xdg_default_browser() == ROUTER_DESKTOP and fallback:
+        xdg_set_default_browser(fallback)
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    if args.dry_run:
+        print("bootstrap: enable mailto and Microsoft 365 link routing")
+    else:
+        enable_router(not args.no_http_router)
+    return launch_app(args.app, args.profile, args.dry_run)
+
+
+def cmd_launch(args: argparse.Namespace) -> int:
+    return launch_app(args.app, args.profile, args.dry_run)
+
+
+def cmd_route(args: argparse.Namespace) -> int:
+    exit_code = 0
+    for url in args.urls:
+        exit_code |= route_url(url, args.profile, args.dry_run)
+    return exit_code
+
+
+def cmd_classify(args: argparse.Namespace) -> int:
+    for url in args.urls:
+        if urllib.parse.urlparse(url).scheme.lower() == "mailto":
+            print(f"mailto app=outlook target={mailto_to_outlook_url(url)}")
+        elif is_m365_url(url):
+            print(f"m365 app={app_for_url(url)} url={url}")
+        else:
+            print(f"external fallback={find_fallback_desktop(read_config()) or '<browser>'} url={url}")
+    return 0
+
+
+def cmd_enable_router(args: argparse.Namespace) -> int:
+    enable_router(not args.no_http_router)
+    print("enabled mailto handler")
+    if not args.no_http_router:
+        print("enabled HTTP/HTTPS Microsoft 365 link router")
+        fallback = read_config().get("fallback_web_browser") or ""
+        if fallback:
+            print(f"fallback browser: {fallback}")
+    return 0
+
+
+def cmd_disable_router(_args: argparse.Namespace) -> int:
+    disable_router()
+    print("disabled Microsoft 365 link router")
+    return 0
+
+
+def cmd_post_install(args: argparse.Namespace) -> int:
+    enable_router(not args.no_http_router)
+    print("registered Outlook mailto handler")
+    if not args.no_http_router:
+        print("enabled HTTP/HTTPS Microsoft 365 link router")
+        fallback = read_config().get("fallback_web_browser") or ""
+        if fallback:
+            print(f"saved fallback browser: {fallback}")
+    return 0
+
+
+def cmd_pre_uninstall(_args: argparse.Namespace) -> int:
+    disable_router()
+    print("restored previous handlers where possible")
+    return 0
+
+
+def font_match(name: str) -> str:
+    if not command_exists("fc-match"):
+        return "fc-match missing"
+    return run_capture(["fc-match", name])
+
+
+def url_status(url: str) -> str:
+    if not command_exists("curl"):
+        return "skipped"
+    completed = subprocess.run(
+        [
+            "curl",
+            "-sSL",
+            "--max-time",
+            "20",
+            "-A",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            url,
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if completed.returncode != 0:
+        return f"curl_{completed.returncode}"
+    code = completed.stdout.strip() or "000"
+    if code.startswith(("2", "3")) or code in {"401", "403", "405", "417"}:
+        return f"reachable_http_{code}"
+    return f"http_{code}"
+
+
+def cmd_doctor(_args: argparse.Namespace) -> int:
+    browser = find_browser()
+    config = read_config()
+    print(f"{APP_NAME} {VERSION}")
+    print(f"browser: {browser}")
+    version = browser_version(browser)
+    if version:
+        print(f"browser_version: {version}")
+    print(f"default_app: {config.get('default_app')}")
+    print(f"default_profile: {config.get('default_profile')}")
+    print(f"profile_dir: {profile_dir(str(config.get('default_profile') or 'work'))}")
+    print(f"default_web_browser: {xdg_default_browser() or '<unknown>'}")
+    print(f"fallback_web_browser: {find_fallback_desktop(config) or '<none>'}")
+    for scheme in ROUTABLE_SCHEMES:
+        print(f"handler_{scheme}: {xdg_handler(scheme) or '<none>'}")
+    print(f"font_segoe_ui: {font_match('Segoe UI')}")
+    print(f"font_calibri: {font_match('Calibri')}")
+    for app, meta in APPS.items():
+        print(f"url_{app}: {url_status(meta['url'])} {meta['url']}")
+    return 0
+
+
+def cmd_print_command(args: argparse.Namespace) -> int:
+    print(shlex.join(build_browser_command(args.app, app_url(args.app), args.profile)))
+    return 0
+
+
+def safe_remove(path: Path) -> None:
+    root = (config_dir() / "profiles").resolve()
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        raise SystemExit(f"error: refusing to remove unexpected path: {path}")
+    if path.exists():
+        shutil.rmtree(path)
+
+
+def cmd_reset_profile(args: argparse.Namespace) -> int:
+    path = profile_dir(args.profile)
+    safe_remove(path)
+    print(f"removed profile: {path}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="m365-linux-shell", description=APP_NAME)
+    parser.add_argument("--version", action="version", version=VERSION)
+    subparsers = parser.add_subparsers(dest="command")
+
+    run_parser = subparsers.add_parser("run", help="enable integration and open an app")
+    run_parser.add_argument("app", nargs="?", choices=sorted(APPS), default="outlook")
+    run_parser.add_argument("--profile", default="work")
+    run_parser.add_argument("--dry-run", action="store_true")
+    run_parser.add_argument("--no-http-router", action="store_true")
+    run_parser.set_defaults(func=cmd_run)
+
+    launch_parser = subparsers.add_parser("launch", help="open an app without changing handlers")
+    launch_parser.add_argument("app", nargs="?", choices=sorted(APPS), default="outlook")
+    launch_parser.add_argument("--profile", default="work")
+    launch_parser.add_argument("--dry-run", action="store_true")
+    launch_parser.set_defaults(func=cmd_launch)
+
+    route_parser = subparsers.add_parser("route", help="route mailto and Microsoft 365 links")
+    route_parser.add_argument("urls", nargs="+")
+    route_parser.add_argument("--profile", default="work")
+    route_parser.add_argument("--dry-run", action="store_true")
+    route_parser.set_defaults(func=cmd_route)
+
+    classify_parser = subparsers.add_parser("classify", help="classify URLs without opening them")
+    classify_parser.add_argument("urls", nargs="+")
+    classify_parser.set_defaults(func=cmd_classify)
+
+    enable_parser = subparsers.add_parser("enable-router", help="enable mailto and Microsoft 365 link routing")
+    enable_parser.add_argument("--no-http-router", action="store_true")
+    enable_parser.set_defaults(func=cmd_enable_router)
+
+    disable_parser = subparsers.add_parser("disable-router", help="restore previous URL handlers")
+    disable_parser.set_defaults(func=cmd_disable_router)
+
+    post_parser = subparsers.add_parser("post-install", help=argparse.SUPPRESS)
+    post_parser.add_argument("--no-http-router", action="store_true")
+    post_parser.set_defaults(func=cmd_post_install)
+
+    pre_parser = subparsers.add_parser("pre-uninstall", help=argparse.SUPPRESS)
+    pre_parser.set_defaults(func=cmd_pre_uninstall)
+
+    doctor_parser = subparsers.add_parser("doctor", help="check local setup")
+    doctor_parser.set_defaults(func=cmd_doctor)
+
+    status_parser = subparsers.add_parser("status", help="alias for doctor")
+    status_parser.set_defaults(func=cmd_doctor)
+
+    print_parser = subparsers.add_parser("print-command", help="print Chromium command")
+    print_parser.add_argument("app", nargs="?", choices=sorted(APPS), default="outlook")
+    print_parser.add_argument("--profile", default="work")
+    print_parser.set_defaults(func=cmd_print_command)
+
+    reset_parser = subparsers.add_parser("reset-profile", help="remove a Chromium profile")
+    reset_parser.add_argument("profile", nargs="?", default="work")
+    reset_parser.set_defaults(func=cmd_reset_profile)
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not hasattr(args, "func"):
+        args = parser.parse_args(["run", "outlook"])
+    return int(args.func(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
