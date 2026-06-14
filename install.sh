@@ -20,6 +20,7 @@ dry_run=0
 uninstall=0
 
 app_entries=(
+  "Teams:teams:Microsoft Teams chat, meetings, and calls"
   "Outlook:outlook:Outlook email and calendar"
   "Microsoft 365:m365:Microsoft 365 home"
   "Word:word:Word for the web"
@@ -61,12 +62,27 @@ desktop_id_for_app() {
   printf '%s.%s.desktop\n' "$APP_ID" "$app"
 }
 
+startup_wm_class_for_app() {
+  case "$1" in
+    teams) printf '%s\n' "M365LinuxTeams" ;;
+    outlook) printf '%s\n' "M365LinuxOutlook" ;;
+    calendar) printf '%s\n' "M365LinuxCalendar" ;;
+    word) printf '%s\n' "M365LinuxWord" ;;
+    excel) printf '%s\n' "M365LinuxExcel" ;;
+    powerpoint) printf '%s\n' "M365LinuxPowerPoint" ;;
+    onedrive) printf '%s\n' "M365LinuxOneDrive" ;;
+    *) printf '%s\n' "M365LinuxShell" ;;
+  esac
+}
+
 write_app_desktop() {
   local name="$1"
   local app="$2"
   local comment="$3"
   local desktop_file
+  local startup_wm_class
   desktop_file="$apps_dir/$(desktop_id_for_app "$app")"
+  startup_wm_class="$(startup_wm_class_for_app "$app")"
 
   cat >"$desktop_file" <<EOF
 [Desktop Entry]
@@ -80,7 +96,7 @@ Icon=$APP_ID
 Terminal=false
 Categories=Office;
 StartupNotify=true
-StartupWMClass=M365LinuxShell
+StartupWMClass=$startup_wm_class
 Actions=OpenWork;OpenPersonal;Doctor;DisableRouter;
 
 [Desktop Action OpenWork]
@@ -114,7 +130,7 @@ Icon=$APP_ID
 Terminal=false
 NoDisplay=true
 Categories=Office;
-MimeType=x-scheme-handler/mailto;x-scheme-handler/http;x-scheme-handler/https;
+MimeType=x-scheme-handler/mailto;x-scheme-handler/msteams;x-scheme-handler/ms-teams;x-scheme-handler/web+msteams;x-scheme-handler/teams;x-scheme-handler/http;x-scheme-handler/https;
 EOF
 }
 

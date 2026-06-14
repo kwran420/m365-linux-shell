@@ -13,10 +13,16 @@ import urllib.parse
 
 APP_ID = "io.github.kwran420.M365LinuxShell"
 APP_NAME = "Microsoft 365 Linux Shell"
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 ROUTER_DESKTOP = f"{APP_ID}.Router.desktop"
 
 APPS = {
+    "teams": {
+        "name": "Teams",
+        "url": "https://teams.cloud.microsoft/?clientType=pwa",
+        "legacy_url": "https://teams.microsoft.com/v2/?clientType=pwa",
+        "class": "M365LinuxTeams",
+    },
     "outlook": {
         "name": "Outlook",
         "url": "https://outlook.cloud.microsoft/mail/",
@@ -103,6 +109,9 @@ MICROSOFT_365_HOSTS = {
     "officeapps.live.com",
     "login.microsoftonline.com",
     "login.live.com",
+    "teams.cloud.microsoft",
+    "teams.microsoft.com",
+    "teams.live.com",
 }
 
 MICROSOFT_365_SUFFIXES = (
@@ -120,7 +129,9 @@ TEAMS_HOSTS = {
     "teams.live.com",
 }
 
-ROUTABLE_SCHEMES = ("http", "https", "mailto")
+TEAMS_SCHEMES = {"msteams", "ms-teams", "web+msteams", "teams"}
+
+ROUTABLE_SCHEMES = ("http", "https", "mailto", "ms-teams", "msteams", "teams", "web+msteams")
 
 
 def xdg_config_home() -> Path:
@@ -342,6 +353,8 @@ def build_browser_command(app: str, target: str, profile: str) -> list[str]:
         "--no-first-run",
         "--no-default-browser-check",
     ]
+    if app == "teams":
+        command.append("--enable-features=WebRTCPipeWireCapturer")
     if os.environ.get("M365_SHELL_USE_WAYLAND") == "1":
         command.append("--ozone-platform=wayland")
     elif os.environ.get("M365_SHELL_OZONE_AUTO") == "1":
@@ -373,9 +386,9 @@ def is_m365_url(url: str) -> bool:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme.lower() == "mailto":
         return True
+    if parsed.scheme.lower() in TEAMS_SCHEMES:
+        return True
     if parsed.scheme.lower() not in {"http", "https"}:
-        return False
-    if is_teams_url(url):
         return False
     host = parsed_host(url)
     return host in MICROSOFT_365_HOSTS or any(host.endswith(suffix) for suffix in MICROSOFT_365_SUFFIXES)
@@ -383,11 +396,15 @@ def is_m365_url(url: str) -> bool:
 
 def is_teams_url(url: str) -> bool:
     parsed = urllib.parse.urlparse(url)
+    if parsed.scheme.lower() in TEAMS_SCHEMES:
+        return True
     host = parsed_host(url)
     return host in TEAMS_HOSTS or host.endswith(".teams.microsoft.com")
 
 
 def app_for_url(url: str) -> str:
+    if is_teams_url(url):
+        return "teams"
     host = parsed_host(url)
     path = urllib.parse.urlparse(url).path.lower()
     if "outlook" in host or path.startswith("/mail"):
@@ -423,6 +440,14 @@ def mailto_to_outlook_url(raw_url: str) -> str:
     return "https://outlook.office.com/mail/deeplink/compose?" + urllib.parse.urlencode(query)
 
 
+def teams_deep_link_url(raw_url: str) -> str:
+    parsed = urllib.parse.urlparse(raw_url)
+    if parsed.scheme.lower() in TEAMS_SCHEMES:
+        encoded = urllib.parse.quote(raw_url, safe="")
+        return f"{app_url('teams')}#deepLink={encoded}"
+    return raw_url
+
+
 def forward_external_url(url: str, dry_run: bool = False) -> int:
     config = read_config()
     desktop = find_fallback_desktop(config)
@@ -444,23 +469,11 @@ def forward_external_url(url: str, dry_run: bool = False) -> int:
     return 0
 
 
-def route_teams_url(url: str, dry_run: bool = False) -> int:
-    teams_command = shutil.which("teams-linux-native")
-    if teams_command:
-        command = [teams_command, "route", url]
-        if dry_run:
-            print("teams-router:", shlex.join(command))
-            return 0
-        subprocess.Popen(command)
-        return 0
-    return forward_external_url(url, dry_run)
-
-
 def route_url(url: str, profile: str, dry_run: bool = False) -> int:
     if urllib.parse.urlparse(url).scheme.lower() == "mailto":
         return launch_url("outlook", mailto_to_outlook_url(url), profile, dry_run)
     if is_teams_url(url):
-        return route_teams_url(url, dry_run)
+        return launch_url("teams", teams_deep_link_url(url), profile, dry_run)
     if is_m365_url(url):
         return launch_url(app_for_url(url), url, profile, dry_run)
     return forward_external_url(url, dry_run)
@@ -468,7 +481,7 @@ def route_url(url: str, profile: str, dry_run: bool = False) -> int:
 
 def capture_previous_handlers(config: dict, include_http: bool) -> dict:
     previous = dict(config.get("previous_handlers", {}))
-    schemes = ["mailto"]
+    schemes = ["mailto", *sorted(TEAMS_SCHEMES)]
     if include_http:
         schemes.extend(["http", "https"])
     for scheme in schemes:
@@ -494,6 +507,8 @@ def enable_router(include_http: bool = True) -> None:
     config = capture_previous_handlers(read_config(), include_http)
     write_config(config)
     xdg_set_handler("mailto", ROUTER_DESKTOP)
+    for scheme in sorted(TEAMS_SCHEMES):
+        xdg_set_handler(scheme, ROUTER_DESKTOP)
     if include_http:
         xdg_set_handler("http", ROUTER_DESKTOP)
         xdg_set_handler("https", ROUTER_DESKTOP)
@@ -506,10 +521,12 @@ def disable_router() -> None:
     fallback = str(config.get("fallback_web_browser") or previous.get("default-web-browser") or "")
     if xdg_handler("mailto") == ROUTER_DESKTOP and previous.get("mailto"):
         xdg_set_handler("mailto", str(previous.get("mailto")))
-    for scheme in ("http", "https"):
+    for scheme in (*sorted(TEAMS_SCHEMES), "http", "https"):
         if xdg_handler(scheme) == ROUTER_DESKTOP:
-            xdg_set_handler(scheme, str(previous.get(scheme) or fallback))
-    if xdg_default_browser() == ROUTER_DESKTOP and fallback:
+            replacement = str(previous.get(scheme) or (fallback if scheme in {"http", "https"} else ""))
+            if replacement and find_desktop_file(replacement):
+                xdg_set_handler(scheme, replacement)
+    if xdg_default_browser() == ROUTER_DESKTOP and fallback and find_desktop_file(fallback):
         xdg_set_default_browser(fallback)
 
 
@@ -536,6 +553,8 @@ def cmd_classify(args: argparse.Namespace) -> int:
     for url in args.urls:
         if urllib.parse.urlparse(url).scheme.lower() == "mailto":
             print(f"mailto app=outlook target={mailto_to_outlook_url(url)}")
+        elif is_teams_url(url):
+            print(f"m365 app=teams url={teams_deep_link_url(url)}")
         elif is_m365_url(url):
             print(f"m365 app={app_for_url(url)} url={url}")
         else:
@@ -546,6 +565,7 @@ def cmd_classify(args: argparse.Namespace) -> int:
 def cmd_enable_router(args: argparse.Namespace) -> int:
     enable_router(not args.no_http_router)
     print("enabled mailto handler")
+    print("enabled Teams protocol handlers")
     if not args.no_http_router:
         print("enabled HTTP/HTTPS Microsoft 365 link router")
         fallback = read_config().get("fallback_web_browser") or ""
@@ -563,6 +583,7 @@ def cmd_disable_router(_args: argparse.Namespace) -> int:
 def cmd_post_install(args: argparse.Namespace) -> int:
     enable_router(not args.no_http_router)
     print("registered Outlook mailto handler")
+    print("registered Teams protocol handlers")
     if not args.no_http_router:
         print("enabled HTTP/HTTPS Microsoft 365 link router")
         fallback = read_config().get("fallback_web_browser") or ""

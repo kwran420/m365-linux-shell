@@ -1,9 +1,9 @@
 # Microsoft 365 Linux Shell
 
 A native-feeling Linux shell for Microsoft 365 web apps. It installs real
-desktop entries for Outlook, Microsoft 365, Word, Excel, PowerPoint, OneDrive,
-and Calendar, runs them in a shared isolated Chromium profile, and routes
-Microsoft 365 links back into the shell.
+desktop entries for Teams, Outlook, Microsoft 365, Word, Excel, PowerPoint,
+OneDrive, and Calendar, runs them in a shared isolated Chromium profile, and
+routes Microsoft 365 links back into the shell.
 
 This does not install Windows Office on Linux. Microsoft does not provide
 supported Linux desktop Office apps. This project uses the supported Microsoft
@@ -17,9 +17,10 @@ supported Linux desktop Office apps. This project uses the supported Microsoft
 
 The default install:
 
-- Adds app menu entries for Outlook, Microsoft 365, Word, Excel, PowerPoint,
-  OneDrive, and Outlook Calendar.
+- Adds app menu entries for Teams, Outlook, Microsoft 365, Word, Excel,
+  PowerPoint, OneDrive, and Outlook Calendar.
 - Registers `mailto:` links to Outlook web compose.
+- Registers Teams protocol links such as `msteams:` and `web+msteams:`.
 - Registers HTTP/HTTPS routing for Microsoft 365 links.
 - Forwards non-Microsoft links back to your saved browser.
 - Installs Selawik font aliases so Microsoft web fonts look right on Linux.
@@ -48,6 +49,7 @@ Open a specific app:
 
 ```bash
 m365-linux-shell launch outlook
+m365-linux-shell launch teams
 m365-linux-shell launch word
 m365-linux-shell launch excel
 m365-linux-shell launch powerpoint
@@ -65,9 +67,9 @@ m365-linux-shell launch outlook --profile personal
 ## Link Routing
 
 Linux desktops route URLs by scheme, not by domain. To catch normal Microsoft
-365 links such as `https://outlook.cloud.microsoft/...` or SharePoint/OneDrive
-links, the shell becomes the default HTTP/HTTPS handler, classifies the URL, and
-forwards non-Microsoft URLs to your saved real browser.
+365 links such as `https://outlook.cloud.microsoft/...`, Teams meeting links,
+or SharePoint/OneDrive links, the shell becomes the default HTTP/HTTPS handler,
+classifies the URL, and forwards non-Microsoft URLs to your saved real browser.
 
 Disable routing:
 
@@ -104,12 +106,13 @@ m365-linux-shell doctor
 - Microsoft 365 web apps: https://support.microsoft.com/en-us/office/get-started-with-my-microsoft-365-apps-91a4ec74-67fe-4a84-a268-f6bdf3da1804
 - Microsoft 365 web browser support: https://support.microsoft.com/en-us/office/which-browsers-work-with-microsoft-365-for-the-web-and-microsoft-365-add-ins-ad1303e0-a318-47aa-b409-d3a5eb44e452
 - Outlook on the web browser support: https://support.microsoft.com/en-us/office/supported-browsers-for-outlook-on-the-web-and-outlook-com-ca350265-6284-4682-9abd-85fc2bd37934
+- Microsoft Teams PWA on Linux: https://learn.microsoft.com/en-us/microsoftteams/teams-progressive-web-apps
 - Unified `cloud.microsoft` domain: https://learn.microsoft.com/en-us/microsoft-365/enterprise/cloud-microsoft-domain
 - Chromium user data directories: https://chromium.googlesource.com/chromium/src/+/HEAD/docs/user_data_dir.md
 
 ## Disclaimer
 
 This project is independent and is not affiliated with Microsoft. Microsoft,
-Microsoft 365, Outlook, Word, Excel, PowerPoint, and OneDrive are Microsoft
-products and trademarks. The included icon is original and intentionally not a
-Microsoft logo.
+Microsoft 365, Teams, Outlook, Word, Excel, PowerPoint, and OneDrive are
+Microsoft products and trademarks. The included icon is original and
+intentionally not a Microsoft logo.

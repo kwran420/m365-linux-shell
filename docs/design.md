@@ -9,9 +9,10 @@ unsupported Windows Office desktop apps are native Linux software.
 
 - System Chromium-family browser as the runtime.
 - Shared isolated profile for Microsoft 365 SSO.
-- Separate desktop entries for each app.
+- Separate desktop entries for each app, including Teams.
 - `mailto:` handler for Outlook compose.
-- Optional HTTP/HTTPS router for Microsoft 365, OneDrive, and SharePoint links.
+- Teams protocol handlers for meeting and chat links.
+- Optional HTTP/HTTPS router for Microsoft 365, Teams, OneDrive, and SharePoint links.
 
 ## Why Not Windows Office Under Wine
 
