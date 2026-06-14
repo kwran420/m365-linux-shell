@@ -1,5 +1,7 @@
 # Microsoft 365 Linux Shell
 
+A stable Linux shell for Microsoft 365 web apps.
+
 A native-feeling Linux shell for Microsoft 365 web apps. It installs real
 desktop entries for Teams, Outlook, Microsoft 365, Word, Excel, PowerPoint,
 OneDrive, and Calendar, runs them in a shared isolated Chromium profile, and
