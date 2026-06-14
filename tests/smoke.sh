@@ -20,11 +20,15 @@ bash -n "$repo_dir/extras/install-fonts.sh"
 
 test -x "$HOME/.local/bin/m365-linux-shell"
 test -f "$XDG_DATA_HOME/icons/hicolor/scalable/apps/io.github.kwran420.M365LinuxShell.svg"
+test -f "$XDG_DATA_HOME/icons/hicolor/scalable/apps/io.github.kwran420.M365LinuxShell.teams.svg"
+test -f "$XDG_DATA_HOME/icons/hicolor/scalable/apps/io.github.kwran420.M365LinuxShell.outlook.svg"
 test -f "$XDG_DATA_HOME/applications/io.github.kwran420.M365LinuxShell.outlook.desktop"
 test -f "$XDG_DATA_HOME/applications/io.github.kwran420.M365LinuxShell.teams.desktop"
 test -f "$XDG_DATA_HOME/applications/io.github.kwran420.M365LinuxShell.word.desktop"
 test -f "$XDG_DATA_HOME/applications/io.github.kwran420.M365LinuxShell.Router.desktop"
 grep -q '^Exec=.*m365-linux-shell run outlook$' "$XDG_DATA_HOME/applications/io.github.kwran420.M365LinuxShell.outlook.desktop"
+grep -q '^Icon=io.github.kwran420.M365LinuxShell.outlook$' "$XDG_DATA_HOME/applications/io.github.kwran420.M365LinuxShell.outlook.desktop"
+grep -q '^Icon=io.github.kwran420.M365LinuxShell.teams$' "$XDG_DATA_HOME/applications/io.github.kwran420.M365LinuxShell.teams.desktop"
 
 if command -v desktop-file-validate >/dev/null 2>&1; then
   desktop-file-validate "$XDG_DATA_HOME"/applications/io.github.kwran420.M365LinuxShell.*.desktop

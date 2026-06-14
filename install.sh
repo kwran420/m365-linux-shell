@@ -62,6 +62,11 @@ desktop_id_for_app() {
   printf '%s.%s.desktop\n' "$APP_ID" "$app"
 }
 
+icon_id_for_app() {
+  local app="$1"
+  printf '%s.%s\n' "$APP_ID" "$app"
+}
+
 startup_wm_class_for_app() {
   case "$1" in
     teams) printf '%s\n' "M365LinuxTeams" ;;
@@ -81,8 +86,10 @@ write_app_desktop() {
   local comment="$3"
   local desktop_file
   local startup_wm_class
+  local icon_id
   desktop_file="$apps_dir/$(desktop_id_for_app "$app")"
   startup_wm_class="$(startup_wm_class_for_app "$app")"
+  icon_id="$(icon_id_for_app "$app")"
 
   cat >"$desktop_file" <<EOF
 [Desktop Entry]
@@ -92,7 +99,7 @@ Name=$name
 GenericName=Microsoft 365 Web App
 Comment=$comment
 Exec=$launcher_file run $app
-Icon=$APP_ID
+Icon=$icon_id
 Terminal=false
 Categories=Office;
 StartupNotify=true
@@ -164,16 +171,19 @@ install_app() {
   run install -d "$bindir" "$apps_dir" "$icons_dir"
   run install -m 0755 "$repo_dir/bin/m365-linux-shell" "$launcher_file"
   run install -m 0644 "$repo_dir/assets/m365-linux-shell.svg" "$icon_file"
+  local entry name app comment
+  for entry in "${app_entries[@]}"; do
+    IFS=: read -r name app comment <<<"$entry"
+    run install -m 0644 "$repo_dir/assets/$app.svg" "$icons_dir/$(icon_id_for_app "$app").svg"
+  done
 
   if [[ "$dry_run" == "1" ]]; then
-    local entry
     for entry in "${app_entries[@]}"; do
       IFS=: read -r _name app _comment <<<"$entry"
       printf 'dry-run: write %q\n' "$apps_dir/$(desktop_id_for_app "$app")"
     done
     printf 'dry-run: write %q\n' "$router_desktop"
   else
-    local entry name app comment
     for entry in "${app_entries[@]}"; do
       IFS=: read -r name app comment <<<"$entry"
       write_app_desktop "$name" "$app" "$comment"
@@ -221,7 +231,7 @@ uninstall_app() {
     printf '\n'
   fi
 
-  run rm -f "$launcher_file" "$icon_file" "$apps_dir"/"$APP_ID".*.desktop
+  run rm -f "$launcher_file" "$icon_file" "$apps_dir"/"$APP_ID".*.desktop "$icons_dir"/"$APP_ID".*.svg
 
   if command -v update-desktop-database >/dev/null 2>&1 && [[ "$dry_run" != "1" ]]; then
     update-desktop-database "$apps_dir" >/dev/null 2>&1 || true

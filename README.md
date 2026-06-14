@@ -19,6 +19,7 @@ The default install:
 
 - Adds app menu entries for Teams, Outlook, Microsoft 365, Word, Excel,
   PowerPoint, OneDrive, and Outlook Calendar.
+- Installs distinct original icons for each app entry.
 - Registers `mailto:` links to Outlook web compose.
 - Registers Teams protocol links such as `msteams:` and `web+msteams:`.
 - Registers HTTP/HTTPS routing for Microsoft 365 links.
